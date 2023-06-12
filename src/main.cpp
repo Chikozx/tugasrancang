@@ -5,16 +5,17 @@
 #include <freertos/list.h>
 #include <WiFi.h>
 #include <time.h>
-#include <FirebaseESP32.h>
+#include <Firebase_ESP_Client.h>
 #include "addons/TokenHelper.h"
 #include "addons/RTDBHelper.h"
 #include "freertos/semphr.h"
 #include <LiquidCrystal_I2C.h>
 
 //firebase
-#define API_KEY "AIzaSyD41dRa3a-6o1f8x8WJzeb4Y0j_0AmSrJQ"
-#define DATABASE_URL "https://askohi-default-rtdb.asia-southeast1.firebasedatabase.app/" 
+#define API_KEY "AIzaSyCNJugv3_95Fwq36fm9lmyRuho2sJ8OOM8"
+#define DATABASE_URL "https://smartdoorlock-40077-default-rtdb.asia-southeast1.firebasedatabase.app/" 
 FirebaseData fbdo;
+FirebaseData fbda;
 FirebaseJson json;
 FirebaseAuth auth;
 FirebaseConfig config;
@@ -39,13 +40,14 @@ char uid[10];
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
 //wifi
-#define WIFI_SSID "yoseph"
-#define WIFI_PASSWORD ""
+#define WIFI_SSID "Chiko"
+#define WIFI_PASSWORD "chikojuga"
 
 SemaphoreHandle_t xSemaphore = NULL;
 
 void printHex(byte *buffer, byte bufferSize);
 void printLocalTime();
+
 
 void baca_kartu(void * parameters){
   for(;;){
@@ -70,7 +72,7 @@ void baca_kartu(void * parameters){
     lcd.setCursor(0,1);
     lcd.print(uid);
     digitalWrite(33,LOW);
-    vTaskDelay(2000);
+    vTaskDelay(2000/portTICK_PERIOD_MS);
     digitalWrite(33,HIGH);
     Serial.println();
     Serial.print("Time scanned is:");
@@ -79,6 +81,7 @@ void baca_kartu(void * parameters){
     xSemaphoreGive(xSemaphore);
     mfrc522.PICC_HaltA();
     mfrc522.PCD_StopCrypto1();
+    
   }
   
   }
@@ -98,12 +101,35 @@ void kirim_data(void * parameters){
       Serial.println("FAILED");
       Serial.println("REASON: " + fbdo.errorReason());
     }
+    char find[50];
+    sprintf(find,"uid/access/%s",uid);
+    Serial.println(find);
+    
+    if (Firebase.RTDB.getJSON(&fbda, find))
+    {
+      Serial.println(fbda.stringData());
+      lcd.clear();
+      lcd.setCursor(0,0);
+      lcd.print("Access Granted");
+      lcd.setCursor(0,1);
+      lcd.print(fbda.stringData());
+    }
+    else
+    {
+      // Failed to get JSON data at defined database path, print out the error reason
+    Serial.println(fbda.errorReason());
+    lcd.clear();
+    lcd.setCursor(0,0);
+    lcd.print("Access Not Granted");
+    }
+
 
     }
     // Write an Float number on the database path test/float
   }
   }
 }
+
 
 void setup() {
 	Serial.begin(9600);
@@ -114,10 +140,10 @@ void setup() {
 	mfrc522.PCD_Init();		
 	delay(4);				
 	mfrc522.PCD_DumpVersionToSerial();	
-	Serial.println(F("Scan PICC to see UID, SAK, type, and data blocks..."));
-  for (byte i = 0; i < 6; i++) {
-    key.keyByte[i] = 0xFF;
+	for (byte i = 0; i < 6; i++) {
+    	key.keyByte[i] = 0xFF;
   }
+  
   //lcdsetup
   lcd.init(I2C_SDA, I2C_SCL); 
 	lcd.backlight();
@@ -126,23 +152,22 @@ void setup() {
   //wifi
   WiFi.begin(WIFI_SSID,WIFI_PASSWORD);
   int count=0;
-  // while (WiFi.status() != WL_CONNECTED){
-  //   lcd.setCursor(18,0);
-	//   lcd.print("Hello, world!");
-  //   lcd.setCursor(15,1);
-  //   lcd.print("Connecting to Wi-Fi");
-  //   delay(500);
-  //   lcd.scrollDisplayLeft();
-  //   count=count+1;
-  //   if (count>=30)
-  //   {
-  //     lcd.noAutoscroll();
-  //     delay(3000);
-  //     lcd.clear();
-  //     count=0;
-  //   }
-    
-  // }
+  while (WiFi.status() != WL_CONNECTED){
+    lcd.setCursor(18,0);
+    lcd.print("Hello, world!");
+    lcd.setCursor(15,1);
+    lcd.print("Connecting to Wi-Fi");
+    delay(500);
+    lcd.scrollDisplayLeft();
+    count=count+1;
+    if (count>=30)
+    {
+      lcd.noAutoscroll();
+      delay(3000);
+      lcd.clear();
+      count=0;
+    }    
+  }
 
   Serial.println();
   lcd.clear();
@@ -150,9 +175,9 @@ void setup() {
   lcd.setCursor(0,0);
   Serial.print("Connected with IP: ");
   lcd.print("Connected with IP: ");
-  // Serial.println(WiFi.localIP());
+  Serial.println(WiFi.localIP());
   lcd.setCursor(0,1);
-  lcd.print("192.168.1.0");
+  lcd.print(WiFi.localIP());
   delay(5000);
   Serial.println();
 
@@ -190,9 +215,8 @@ void setup() {
   );
 
   xTaskCreate(
-    kirim_data, "kirim_data", 8000,NULL,0,NULL
-  );
-
+    kirim_data, "kirim_data", 8000,NULL,0, NULL
+    );
 
 }
 
