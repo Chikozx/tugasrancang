@@ -3,7 +3,7 @@
 #include <MFRC522.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/list.h>
-#include <WiFi.h>
+#include <WiFiManager.h> 
 #include <time.h>
 #include <Firebase_ESP_Client.h>
 #include "addons/TokenHelper.h"
@@ -23,9 +23,10 @@ bool signupOK = false;
 
 //NTP 
 const char* ntpServer = "pool.ntp.org";
-const long  gmtOffset_sec = 3600;
+const long  gmtOffset_sec = 21600;
 const int   daylightOffset_sec = 3600;
 char waktu[20];
+char waktud[20];
 
 //RFID
 #define RST_PIN         15          
@@ -48,11 +49,35 @@ SemaphoreHandle_t xSemaphore = NULL;
 void printHex(byte *buffer, byte bufferSize);
 void printLocalTime();
 
+bool stale = true;
+int ulang=0;
 
 void baca_kartu(void * parameters){
   for(;;){
     if ( ! mfrc522.PICC_IsNewCardPresent()) {
-		
+    if (stale)
+    { 
+      if (ulang==0)
+      {
+        lcd.clear();
+        struct tm timeinfo;
+        getLocalTime(&timeinfo);
+        strftime(waktud,20,"%d %b %y, %H:%M:%S", &timeinfo);
+        lcd.setCursor(0,1);
+        lcd.print(waktud);
+        lcd.setCursor(0,0);
+        lcd.print("Scan your card!");
+        ulang++;
+      }
+      else if (ulang>20)
+      {
+        ulang=0;
+      } else
+      {
+        ulang++;
+      }
+      vTaskDelay(500/portTICK_PERIOD_MS);
+    }
 	}
 
 	// Select one of the cards
@@ -60,7 +85,7 @@ void baca_kartu(void * parameters){
 	
 	} else
   {
-    
+    stale=false;
     sprintf(uid, "%d %d %d %d", mfrc522.uid.uidByte[0],mfrc522.uid.uidByte[1],mfrc522.uid.uidByte[2],mfrc522.uid.uidByte[3]);
     
     Serial.print("Uid is:");
@@ -71,9 +96,6 @@ void baca_kartu(void * parameters){
     lcd.print("Uid is :");
     lcd.setCursor(0,1);
     lcd.print(uid);
-    digitalWrite(33,LOW);
-    vTaskDelay(2000/portTICK_PERIOD_MS);
-    digitalWrite(33,HIGH);
     Serial.println();
     Serial.print("Time scanned is:");
     printLocalTime();
@@ -113,6 +135,11 @@ void kirim_data(void * parameters){
       lcd.print("Access Granted");
       lcd.setCursor(0,1);
       lcd.print(fbda.stringData());
+      digitalWrite(33,LOW);
+      vTaskDelay(2000/portTICK_PERIOD_MS);
+      digitalWrite(33,HIGH);
+      vTaskDelay(3000/portTICK_PERIOD_MS);
+      stale=true;
     }
     else
     {
@@ -121,14 +148,16 @@ void kirim_data(void * parameters){
     lcd.clear();
     lcd.setCursor(0,0);
     lcd.print("Access Not Granted");
+    vTaskDelay(3000/portTICK_PERIOD_MS);
+    stale=true;
     }
-
-
     }
-    // Write an Float number on the database path test/float
+    
   }
   }
 }
+
+
 
 
 void setup() {
@@ -150,34 +179,23 @@ void setup() {
   
 
   //wifi
-  WiFi.begin(WIFI_SSID,WIFI_PASSWORD);
-  int count=0;
-  while (WiFi.status() != WL_CONNECTED){
-    lcd.setCursor(18,0);
-    lcd.print("Hello, world!");
-    lcd.setCursor(15,1);
-    lcd.print("Connecting to Wi-Fi");
-    delay(500);
-    lcd.scrollDisplayLeft();
-    count=count+1;
-    if (count>=30)
-    {
-      lcd.noAutoscroll();
-      delay(3000);
-      lcd.clear();
-      count=0;
-    }    
-  }
-
+  WiFiManager wm;
+  bool done;
+  lcd.setCursor(0,0);
+  lcd.print("Please Connect :");
+  lcd.setCursor(0,1);
+  lcd.print("to Smartdoorlock");
+  done=wm.autoConnect("Smartdoorlock","password");
+  
+  
   Serial.println();
   lcd.clear();
-  
   lcd.setCursor(0,0);
-  Serial.print("Connected with IP: ");
-  lcd.print("Connected with IP: ");
-  Serial.println(WiFi.localIP());
+  Serial.print("Connected to : ");
+  lcd.print("Connected to : ");
+  Serial.println(wm.getWiFiSSID());
   lcd.setCursor(0,1);
-  lcd.print(WiFi.localIP());
+  lcd.print(wm.getWiFiSSID());
   delay(5000);
   Serial.println();
 
@@ -185,13 +203,12 @@ void setup() {
   config.api_key = API_KEY;
   config.database_url = DATABASE_URL;
 
-  if (Firebase.signUp(&config, &auth, "", "")){
-    Serial.println("ok");
-    signupOK = true;
-  }
-  else{
+  while (!Firebase.signUp(&config, &auth, "", "")){
     Serial.printf("%s\n", config.signer.signupError.message.c_str());
+    Firebase.signUp(&config, &auth, "", "");
   }
+  Serial.println("ok");
+  signupOK = true;
 
   /* Assign the callback function for the long running token generation task */
   config.token_status_callback = tokenStatusCallback; //see addons/TokenHelper.h
@@ -199,14 +216,15 @@ void setup() {
   Firebase.reconnectWiFi(true);
 
   //waktu
-  configTime(gmtOffset_sec,daylightOffset_sec,ntpServer);
+  struct tm timeinfo;
+  while (!getLocalTime(&timeinfo))
+  {
+    Serial.println("Failed to obtain time trying again...");
+    configTime(gmtOffset_sec,daylightOffset_sec,ntpServer);
+  }
   printLocalTime();
 
-  lcd.clear();
-  lcd.setCursor(0,0);
-  lcd.print("Scan your card");
-  lcd.setCursor(0,1);
-  lcd.print("To open the door!!");
+  
 
   xSemaphore = xSemaphoreCreateBinary();
   
